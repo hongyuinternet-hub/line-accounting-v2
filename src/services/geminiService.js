@@ -1,8 +1,7 @@
-const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const client = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 const CATEGORIES = ['餐飲', '交通', '購物', '娛樂', '醫療', '居家', '教育', '其他'];
 
@@ -43,14 +42,11 @@ async function analyzeTextExpense(text) {
 3. 金額去除貨幣符號（$、元、NT$）`;
 
   try {
-    const message = await client.messages.create({
-      model: 'claude-3-opus-20250219',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    console.log('Gemini API Key:', process.env.GEMINI_API_KEY ? '✅ 已設定' : '❌ 未設定');
 
-    const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
-    console.log('Claude 回應:', responseText);
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+    console.log('Gemini 回應:', responseText);
 
     const cleaned = responseText.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
@@ -61,7 +57,7 @@ async function analyzeTextExpense(text) {
       item.item && typeof item.amount === 'number' && item.amount > 0
     );
   } catch (err) {
-    console.error('Claude 文字分析失敗:', err);
+    console.error('Gemini 分析失敗:', err.message);
     return [];
   }
 }

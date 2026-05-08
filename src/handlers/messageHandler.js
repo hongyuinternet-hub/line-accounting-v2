@@ -1,4 +1,4 @@
-const { analyzeTextExpense } = require('../services/claudeService');
+const { analyzeTextExpense } = require('../services/geminiService');
 const { appendExpense } = require('../services/sheetsService');
 const { formatExpenseSuccess, formatError, formatHelp } = require('../utils/messageFormatter');
 
