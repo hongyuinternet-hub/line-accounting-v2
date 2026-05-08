@@ -1,7 +1,7 @@
 {
   "name": "line-accounting-bot",
-  "version": "2.0.0",
-  "description": "AI 記帳機器人 - LINE + Claude + Google Sheets",
+  "version": "3.0.0",
+  "description": "AI 記帳機器人 v3.0 - LINE + Gemini + Google Sheets",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
