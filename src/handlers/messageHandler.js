@@ -1,5 +1,4 @@
 const { analyzeTextExpense } = require('../services/geminiService');
-const { analyzeReceiptImage } = require('../services/receiptService');
 const { appendExpense } = require('../services/sheetsService');
 const {
   queryExpensesByDateRange,
@@ -32,24 +31,29 @@ async function handleEvent(event, client) {
 async function handleTextMessage(event, client, userId) {
   const text = event.message.text.trim();
 
+  console.log('收到訊息:', text);
+
   // 說明指令
   if (text === 'help' || text === '說明' || text === '幫助') {
     return client.replyMessage(event.replyToken, formatHelp());
   }
 
-  // 檢測是否是查詢命令（包含「多少」、「花」、「昨天」等關鍵字）
+  // 檢測是否是查詢命令
   if (isQueryCommand(text)) {
+    console.log('檢測到查詢命令');
     return handleExpenseQuery(event, client, userId, text);
   }
 
   // 普通記帳
+  console.log('處理普通記帳');
   try {
     const expenses = await analyzeTextExpense(text);
 
     if (!expenses || expenses.length === 0) {
+      console.log('無法識別記帳內容');
       return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: '😅 無法辨識記帳內容，請試試：「便當80」或「搭捷運30元」\n或輸入「說明」看使用方式',
+        text: '😅 無法辨識記帳內容\n\n例如：\n• 便當80\n• 搭捷運30\n• 星巴克150\n\n或查詢：\n• 我昨天花多少？\n• 這月花了多少？',
       });
     }
 
@@ -79,6 +83,7 @@ async function handleTextMessage(event, client, userId) {
  * 處理圖片訊息 - 收據辨識
  */
 async function handleImageMessage(event, client, userId) {
+  console.log('收到圖片訊息');
   const messageId = event.message.id;
 
   try {
@@ -91,35 +96,45 @@ async function handleImageMessage(event, client, userId) {
     });
 
     stream.on('end', async () => {
-      const buffer = Buffer.concat(chunks);
-      const base64 = buffer.toString('base64');
+      try {
+        const buffer = Buffer.concat(chunks);
+        const base64 = buffer.toString('base64');
 
-      // 分析收據
-      const expenses = await analyzeReceiptImageBuffer(base64);
+        console.log('圖片大小:', buffer.length, '位元組');
 
-      if (!expenses || expenses.length === 0) {
-        return client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '📸 無法辨識收據，請確保圖片清晰',
-        });
-      }
+        // 分析收據
+        const expenses = await analyzeReceiptImageBuffer(base64);
 
-      // 寫入 Google Sheet
-      const results = [];
-      for (const expense of expenses) {
-        try {
-          await appendExpense(userId, expense);
-          results.push(expense);
-        } catch (err) {
-          console.error('寫入失敗:', err);
+        if (!expenses || expenses.length === 0) {
+          console.log('無法辨識收據');
+          return client.replyMessage(event.replyToken, {
+            type: 'text',
+            text: '📸 無法辨識收據\n請確保圖片清晰，光線充足',
+          });
         }
-      }
 
-      if (results.length === 0) {
-        return client.replyMessage(event.replyToken, formatError('記帳失敗，請稍後再試'));
-      }
+        console.log('辨識到', expenses.length, '筆項目');
 
-      return client.replyMessage(event.replyToken, formatExpenseSuccess(results));
+        // 寫入 Google Sheet
+        const results = [];
+        for (const expense of expenses) {
+          try {
+            await appendExpense(userId, expense);
+            results.push(expense);
+          } catch (err) {
+            console.error('寫入失敗:', err);
+          }
+        }
+
+        if (results.length === 0) {
+          return client.replyMessage(event.replyToken, formatError('記帳失敗'));
+        }
+
+        return client.replyMessage(event.replyToken, formatExpenseSuccess(results));
+      } catch (err) {
+        console.error('圖片處理錯誤:', err);
+        client.replyMessage(event.replyToken, formatError('圖片處理失敗'));
+      }
     });
 
     stream.on('error', err => {
@@ -136,8 +151,27 @@ async function handleImageMessage(event, client, userId) {
  * 檢測是否是查詢命令
  */
 function isQueryCommand(text) {
-  const keywords = ['多少', '花', '昨天', '今天', '這週', '本週', '上週', '這月', '本月', '上個月', '今年', '消費', '支出', '統計'];
-  return keywords.some(keyword => text.includes(keyword));
+  const keywords = [
+    '多少',
+    '花',
+    '昨天',
+    '今天',
+    '這週',
+    '本週',
+    '上週',
+    '這月',
+    '本月',
+    '上個月',
+    '今年',
+    '消費',
+    '支出',
+    '統計',
+    '查詢',
+  ];
+  
+  const hasKeyword = keywords.some(keyword => text.includes(keyword));
+  console.log('查詢關鍵字檢測:', hasKeyword, '文字:', text);
+  return hasKeyword;
 }
 
 /**
@@ -149,8 +183,12 @@ async function handleExpenseQuery(event, client, userId, text) {
     const dateQuery = parseDateQuery(text);
     const { start, end, period } = dateQuery;
 
+    console.log('查詢期間:', period, '從', start.format('YYYY-MM-DD'), '到', end.format('YYYY-MM-DD'));
+
     // 查詢花費
     const expenses = await queryExpensesByDateRange(userId, start, end);
+
+    console.log('查詢結果:', expenses.length, '筆');
 
     // 計算統計
     const stats = calculateStats(expenses);
@@ -158,32 +196,13 @@ async function handleExpenseQuery(event, client, userId, text) {
     // 生成摘要文字
     const summary = generateExpenseSummary(period, stats);
 
-    // 生成圓餅圖
-    const chartSvg = generatePieChart(stats.byCategory);
+    console.log('摘要:', summary);
 
     // 回覆訊息
-    const messages = [
-      {
-        type: 'text',
-        text: summary,
-      },
-      {
-        type: 'image',
-        originalContentUrl: 'https://example.com/chart.jpg', // 暫時 placeholder
-        previewImageUrl: 'https://example.com/chart-preview.jpg',
-      },
-    ];
-
-    // 如果有圓餅圖資料，生成 SVG 並作為文字回傳
-    if (Object.keys(stats.byCategory).length > 0) {
-      const chartMessage = {
-        type: 'text',
-        text: `\n📊 圖表已生成，請查看上方`,
-      };
-      messages.push(chartMessage);
-    }
-
-    return client.replyMessage(event.replyToken, messages.slice(0, 5)); // LINE 限制最多 5 個訊息
+    return client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: summary,
+    });
   } catch (err) {
     console.error('查詢花費失敗:', err);
     return client.replyMessage(event.replyToken, formatError('查詢失敗，請稍後再試'));
@@ -206,7 +225,7 @@ async function analyzeReceiptImageBuffer(base64Image) {
 
 分類選項：${CATEGORIES.join('、')}
 
-請回傳 JSON 陣列：
+請回傳 JSON 陣列，例如：
 [
   {
     "item": "品項名稱",
@@ -238,6 +257,8 @@ async function analyzeReceiptImageBuffer(base64Image) {
     });
 
     const responseText = result.response.text();
+    console.log('收據分析回應:', responseText);
+
     const cleaned = responseText.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
 
